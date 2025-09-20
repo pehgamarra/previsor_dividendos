@@ -40,13 +40,16 @@ ticker = st.sidebar.selectbox(
 )
 
 # Período de histórico
-period = st.sidebar.radio(
-    "Período do histórico em anos:",
-    options=["5y", "10y", "15y", "20y", "max"],
-    index=1,
-    horizontal=True
+years = st.sidebar.slider(
+    "Período do histórico (anos):",
+    min_value=1,
+    max_value=20,
+    value=10,
+    step=1
 )
 
+# converter para string no formato do yfinance
+period = f"{years}y"
 # Botão para rodar
 run = st.sidebar.button("🔎 Analisar")
 
