@@ -1,0 +1,206 @@
+1) Resumo do projeto (e o que ele prova)
+
+Nome sugerido: Previsor de Dividendos — DividendPredictor
+Objetivo: prever (1) se uma empresa pagará dividendo no próximo período e (2) o valor/percentual (ou intervalo) desse dividendo.
+O que isso mostra no portfólio: engenharia de dados/ETL, série temporal e ML, validação temporal/robusta, backtest de estratégia de investimento, explicabilidade (SHAP), produto (Streamlit) e deployment/reprodutibilidade.
+
+2) MVP — funcionalidades mínimas (o que precisa existir para já valer no portfólio)
+
+Pipeline de coleta: histórico de preços + histórico de dividendos + principais indicadores (EPS, payout, FCF, dívida).
+
+EDA interativa: yield histórico, frequência de pagamento, histograma de cortes.
+
+Modelo baseline: regra simples (ex.: último dividendo ou média móvel) + modelo ML (XGBoost ou RandomForest) para regressão do valor.
+
+Avaliação temporal: TimeSeriesSplit / walk-forward CV e métricas (MAE, RMSE, MAPE) + comparação com baseline.
+
+Backtest simples: estratégia que seleciona top-N preditos e compara retorno acumulado vs benchmark.
+
+Streamlit com: seleção de tickers, gráficos de histórico vs previsão, tabela com recomendações e download CSV.
+
+README e post curto explicando resultados e limitações.
+
+3) Passo a passo detalhado (execução técnica)
+Passo 1 — Definir alvo(s)
+
+Classificação: “vai pagar dividendo no próximo período?” (0/1)
+
+Regressão: “quanto vai pagar?” (valor absoluto ou % do preço)
+
+Recomendo dois modelos: primeiro classificador (decisão binária), depois regressão só nos positivos. Isso evita zeros demais contaminando a regressão.
+
+Passo 2 — Dados (coleta & limpeza)
+
+Fontes: yfinance (preço + histórico de dividendos), APIs financeiras (Alpha Vantage / Finnhub / IEX / dados contábeis), demonstrações (if possible; para BR: B3/DFP ou CVM), macro (taxa SELIC, CDI, juros EUA).
+
+Dados a coletar por ticker:
+
+Dividendos históricos (data, valor por ação).
+
+Preço histórico (fechamento, volume).
+
+Fundamentals: EPS, Net Income, FCF, cash on hand, dividend payout ratio, debt/equity, ROE.
+
+Eventos: splits, buybacks, mudanças de política de dividendos (quando possível).
+
+Limpeza: alinhar datas, forward-fill/trim, ajustar por splits, remover survivorship bias (incluir empresas que desapareceram se possível).
+
+Passo 3 — Feature engineering
+
+Lags do dividendo (t-1, t-2, …).
+
+Médias móveis e tendências de dividendos e yield (3/6/12 meses).
+
+Crescimento de EPS e FCF (YoY, QoQ).
+
+Ratios: payout ratio, dividend yield atual, PE, EV/EBITDA.
+
+Indicadores de liquidez e endividamento.
+
+Variáveis de mercado: retorno do setor, volatilidade 30/90d.
+
+Sazonalidade: mês/quarter dummies (muitas empresas pagam trimestralmente).
+
+Features temporais: tempo desde último pagamento, frequência histórica.
+
+(Opcional) Sentimento das chamadas trimestrais / manchetes (NLP) e sinais de buyback/insider.
+
+Passo 4 — Baselines e validação
+
+Baselines: última distribuição; média dos últimos 4 pagamentos; rule-based (se payout está entre X e Y então paga).
+
+Validação temporal: usar walk-forward / TimeSeriesSplit (evitar shuffle).
+
+Métricas: regressão (MAE, RMSE, MAPE), classificação (accuracy, precision, recall, F1, AUC).
+
+Avaliação econômica: retorno médio da estratégia, Sharpe, max drawdown (isso vende a parte “impacto” do modelo).
+
+Passo 5 — Modelagem
+
+Modelos iniciais: LinearRegression / Ridge + RandomForest / XGBoost / LightGBM.
+
+Modelos seqüenciais avançados (se quiser depth): LSTM/Temporal Transformer para séries se você tiver sequência longa por empresa.
+
+Hiperparâmetros: usar Optuna ou sklearn GridSearch com TimeSeriesSplit.
+
+Estratégia de ensemble: combinar classificação+regressão; média ponderada dos modelos.
+
+Produzir intervalos de confiança: quantile regression (LightGBM quantile) ou bootstrap para incerteza.
+
+Passo 6 — Backtest & estratégia
+
+Estratégia simples: a cada período, selecionar top-k tickers por previsão de yield/valor e simular compra por X dias (ou manter até próximo pagamento).
+
+Comparar com benchmark (IBOV/SP500) e com estratégia “comprar dividendos mais altos históricos”.
+
+Medir performance: retorno acumulado, anualizado, Sharpe, turnover, e drawdowns.
+
+Passo 7 — Explicabilidade e robustez
+
+SHAP para explicar features por previsão (mostre qual feature levou ao “pagar” ou ao valor previsto).
+
+Feature importance global + explicações locais.
+
+Testes de robustez: out-of-sample por setor e por market cap; teste com períodos de crise.
+
+Passo 8 — Produto (Streamlit)
+
+Páginas sugeridas:
+
+Landing / Exec summary (KPIs, gráficos-chave).
+
+Explorador de tickers (filtrar por setor/mkt cap/yield previsto).
+
+Visualização por empresa: histórico de dividendos, previsões e SHAP local.
+
+Backtest (simular carteira com parâmetros: N, capital, rebalancing).
+
+Downloads / export CSV e link para notebook.
+
+UX: filtros, hover em gráficos, explicação de como interpretar previsões, “confiança” do modelo.
+
+Passo 9 — Reprodutibilidade & deployment
+
+Dockerfile + requirements.txt.
+
+Notebooks: 1) coleta + limpeza, 2) EDA, 3) modelagem, 4) backtest.
+
+GitHub com bons commits e um README técnico + um “case study” em md com gráficos exportados.
+
+Deployment: Streamlit Cloud / Heroku / Docker em VPS.
+
+CI: GitHub Actions para rodar testes básicos (linters, testes unitários).
+
+4) Stack e bibliotecas sugeridas
+
+Python 3.9+; pandas, numpy, scikit-learn, xgboost/lightgbm, statsmodels.
+
+yfinance (coleta inicial), requests (para APIs), beautifulsoup (se for scrap).
+
+Optuna (tuning), shap (explicabilidade).
+
+matplotlib / plotly (interativos) — Streamlit compatível.
+
+backtesting: vectorbt ou backtrader (opcional).
+
+Streamlit para front-end.
+
+Docker para deployment.
+
+5) Estrutura de pastas sugerida (git)
+dividend-predictor/
+├─ data/                    # snapshots + small sample (big data via script)
+├─ src/
+│  ├─ etl/
+│  │   ├─ fetch_yfinance.py
+│  │   └─ fetch_fundamentals.py
+│  ├─ features/
+│  ├─ models/
+│  │   ├─ train.py
+│  │   └─ predict.py
+│  ├─ backtest/
+│  └─ utils/
+├─ notebooks/
+│  ├─ 01_EDA.ipynb
+│  ├─ 02_modeling.ipynb
+├─ app/
+│  └─ streamlit_app.py
+├─ Dockerfile
+├─ requirements.txt
+└─ README.md
+
+6) Como apresentar no portfólio (o que destacar)
+
+Comece com uma história: problema → hipótese → resultado (ex.: “predizemos pagamentos e melhoramos seleção de carteira X% vs baseline”).
+
+Mostre gráficos claros: predicted vs actual, SHAP summary, curva de retorno do backtest.
+
+Inclua notebook replicável e scripts de coleta (sem dados privados).
+
+Demonstre testes e validação temporal (mostre que evitou lookahead bias).
+
+Destaque o que você fez tecnicamente (ETL robusto, validação temporal, otimização, deployment).
+
+Termine com limitações e próximos passos — isso mostra pensamento crítico.
+
+7) Armadilhas comuns (e como evitá-las)
+
+Lookahead bias: sempre treine/valide com splits temporais.
+
+Survivorship bias: tente incluir empresas delistadas ao avaliar desempenho histórico.
+
+Ruído alto: dividendos podem ser ruídos estratégicos — combine sinais contábeis.
+
+Dados faltantes / diferentes padrões regionais: normalize e documente diferenças entre mercados (BR vs US).
+
+8) Extras (diferenciais que impressionam)
+
+Calcular probabilidade de corte de dividendos (survival analysis).
+
+Incluir policy detection (algoritmo para identificar mudanças na política de dividendos).
+
+Integração com alertas por email/Telegram quando um ticker alterar expectativa.
+
+Implementar intervalos de previsão e mostrar “risco” da previsão.
+
+Publicar um post técnico (Medium/Dev.to/LinkedIn) explicando os achados.
