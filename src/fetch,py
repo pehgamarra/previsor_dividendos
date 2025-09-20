@@ -1,0 +1,19 @@
+import yfinance as yf
+import pandas as pd
+
+def fetch_data(ticker: str, period: str = "15y") -> pd.DataFrame:
+    """
+    Coleta preços e dividendos de um ticker usando yfinance.
+    """
+    stock = yf.Ticker(ticker)
+
+    dividends = stock.dividends.reset_index()
+    dividends.columns = ["date", "dividend"]
+
+    prices = stock.history(period=period)[["Close"]].reset_index()
+    prices.columns = ["date", "close"]
+
+    data = pd.merge(prices, dividends, on="date", how="left")
+    data["dividend"] = data["dividend"].fillna(0.0)
+
+    return data
