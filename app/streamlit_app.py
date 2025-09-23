@@ -3,8 +3,10 @@ import os
 import streamlit as st
 import pandas as pd
 import yfinance as yf
+from sklearn.metrics import mean_absolute_error
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from src.models.modeling import bootstrap_ci, economic_eval, ensemble_predictions, train_model
 from src.data.fetch import fetch_data
 from src.data.preprocess import preprocess_quarterly
 from src.features.engineering import build_features
@@ -53,7 +55,7 @@ run = st.sidebar.button("🔎 Analisar")
 # --------------------
 # Execução
 # --------------------
-if run:
+if "run_analysis" not in st.session_state:
     with st.spinner("Coletando dados..."):
         raw = fetch_data(ticker, period)
         quarterly = preprocess_quarterly(raw, ticker)
@@ -66,7 +68,7 @@ if run:
     # --------------------
     # Abas
     # --------------------
-    tab1, tab2, tab3 = st.tabs(["📈 Dividendos", "🏢 Empresa", "📖 Glossário & Dicas"])
+    tab1, tab2, tab3, tab4 = st.tabs(["📈 Dividendos", "🏢 Empresa", "📖 Glossário & Dicas", "🖥️Modelagem"])
 
     # --------------------
     # Aba 1: Dividendos
@@ -229,7 +231,103 @@ if run:
             st.markdown("Empresas americanas de tecnologia tendem a reinvestir lucros em crescimento, pagando menos dividendos (exceto Coca-Cola).")
         else:
             st.markdown("Analise o histórico de dividendos, compare com empresas do mesmo setor e avalie se o perfil de risco combina com você.")
-           
+
+    # --------------------
+    # Aba 4: Modelagem
+    # -------------------- 
+
+    with tab4:
+        st.header("🤖 Modelagem de Dividendos")
+        st.markdown("Treine modelos e avalie previsões com intervalos de confiança e impacto econômico.")
+
+        # ------------------------
+        # Inicializar session_state
+        # ------------------------
+        if "run_model" not in st.session_state:
+            st.session_state.run_model = False
+        if "model_option" not in st.session_state:
+            st.session_state.model_option = "Ridge"
+        if "preds_dict" not in st.session_state:
+            st.session_state.preds_dict = {}
+        if "df_pred" not in st.session_state:
+            st.session_state.df_pred = pd.DataFrame()
+
+        # ------------------------
+        # Seleção do modelo
+        # ------------------------
+        st.session_state.model_option = st.selectbox(
+            "Escolha o modelo:",
+            ["Ridge", "RandomForest", "XGBoost", "LightGBM", "Ensemble"],
+            index=["Ridge","RandomForest","XGBoost","LightGBM","Ensemble"].index(st.session_state.model_option)
+        )
+        n_splits = st.slider("Número de splits TimeSeriesSplit:", 3, 10, 5)
+
+        # ------------------------
+        # Botão de execução
+        # ------------------------
+        if st.button("🔎 Rodar previsão"):
+            st.session_state.run_model = True
+
+            features = build_features(quarterly)
+            X = features.drop(columns=["dividend", "quarter"])
+            y = features["dividend"]
+
+            with st.spinner("Treinando modelo(s)..."):
+                preds_dict = {}
+                if st.session_state.model_option != "Ensemble":
+                    mtype = st.session_state.model_option.lower().replace("lightgbm", "lgb").replace("xgboost","xgb").replace("randomforest","rf")
+                    preds, mae = train_model(X, y, model_type=mtype, n_splits=n_splits)
+                    preds_dict[st.session_state.model_option] = preds
+                    st.session_state.df_pred = pd.DataFrame({
+                        "quarter": features["quarter"],
+                        "dividend_real": y,
+                        "dividend_pred": preds
+                    })
+                else:
+                    for m in ["ridge","rf","xgb","lgb"]:
+                        preds, _ = train_model(X, y, model_type=m, n_splits=n_splits)
+                        preds_dict[m.upper()] = preds
+                    ensemble_preds = ensemble_predictions(preds_dict)
+                    st.session_state.df_pred = pd.DataFrame({
+                        "quarter": features["quarter"],
+                        "dividend_real": y,
+                        "dividend_pred": ensemble_preds
+                    })
+
+                st.session_state.preds_dict = preds_dict
+
+        # ------------------------
+        # Mostrar resultados
+        # ------------------------
+        if st.session_state.run_model and not st.session_state.df_pred.empty:
+            df_pred = st.session_state.df_pred
+
+            # Intervalos de confiança
+            lower, upper = bootstrap_ci(df_pred["dividend_real"], df_pred["dividend_pred"])
+            df_pred["ci_lower"] = lower
+            df_pred["ci_upper"] = upper
+
+            # Avaliação econômica
+            mean_ret, sharpe, drawdown = economic_eval(df_pred["dividend_real"], df_pred["dividend_pred"])
+
+            st.success("✅ Modelo treinado!")
+            
+            st.metric("MAE (aprox)", f"{mean_absolute_error(df_pred['dividend_real'], df_pred['dividend_pred']):.4f}")
+            st.metric("Retorno médio", f"{mean_ret:.4f}")
+            st.metric("Sharpe ratio", f"{sharpe:.2f}")
+            st.metric("Max Drawdown", f"{drawdown:.2f}")
+
+            st.subheader("📊 Previsões x Real com intervalo de confiança")
+            st.line_chart(df_pred.set_index("quarter")[["dividend_real", "dividend_pred"]])
+            st.dataframe(df_pred, use_container_width=True)
+
+            st.download_button(
+                "💾 Baixar previsões CSV",
+                data=df_pred.to_csv(index=False),
+                file_name=f"{ticker}_predictions.csv",
+                mime="text/csv"
+            )
+
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")
  
