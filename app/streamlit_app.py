@@ -3,12 +3,12 @@ import os
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-from src.features.engineering import build_features
-
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from src.data.fetch import fetch_data
 from src.data.preprocess import preprocess_quarterly
+from src.features.engineering import build_features
+from src.evaluation.baselines import evaluate_baselines
 
 # --------------------
 # Configuração inicial
@@ -57,11 +57,11 @@ if run:
     with st.spinner("Coletando dados..."):
         raw = fetch_data(ticker, period)
         quarterly = preprocess_quarterly(raw, ticker)
-
+        features = build_features(quarterly)
+        results = evaluate_baselines(quarterly, n_splits=5)
         # puxar informações da empresa
         yf_ticker = yf.Ticker(ticker)
         info = yf_ticker.info
-
     st.success(f" ### {ticker} - {available_tickers[ticker]}")
 
     # --------------------
