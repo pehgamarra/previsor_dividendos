@@ -59,7 +59,6 @@ if run:
         quarterly = preprocess_quarterly(raw, ticker)
         features = build_features(quarterly)
         results = evaluate_baselines(quarterly, n_splits=5)
-        # puxar informações da empresa
         yf_ticker = yf.Ticker(ticker)
         info = yf_ticker.info
     st.success(f" ### {ticker} - {available_tickers[ticker]}")
