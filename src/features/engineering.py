@@ -68,3 +68,28 @@ def select_top_k(df_preds, k=3, by="dividend_pred"):
         top_k = group.sort_values(by=by, ascending=False).head(k)
         top_k_list.append(top_k)
     return pd.concat(top_k_list).reset_index(drop=True)
+
+
+def compute_metrics(returns):
+    if returns.empty:
+        return {"CAGR": np.nan, "Sharpe": np.nan, "Max Drawdown": np.nan}
+
+    # n_years a partir do período coberto pela série
+    if isinstance(returns.index, pd.DatetimeIndex) and len(returns.index) > 1:
+        days = (returns.index.max() - returns.index.min()).days
+        n_years = max(days / 365.25, 1/252)
+    else:
+        n_years = max(len(returns) / 252, 1/252)
+
+    # Total Return
+    total_return = (1 + returns).prod()
+    CAGR = total_return ** (1 / n_years) - 1
+
+    # Sharpe annualizado (assume risk-free = 0)
+    sharpe = returns.mean() / (returns.std() if returns.std() > 0 else np.nan) * np.sqrt(252)
+
+    # Max Drawdown
+    cumulative = (1 + returns).cumprod()
+    max_dd = (cumulative / cumulative.cummax() - 1).min()
+
+    return {"CAGR": CAGR, "Sharpe": sharpe, "Max Drawdown": max_dd}

@@ -7,10 +7,10 @@ import yfinance as yf
 from sklearn.metrics import mean_absolute_error
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.models.modeling import bootstrap_ci, economic_eval, train_model, strategy_metrics, simulate_strategy
+from src.models.modeling import bootstrap_ci, economic_eval, train_model, simulate_strategy
 from src.data.fetch import fetch_data, fetch_price_history
 from src.data.preprocess import preprocess_quarterly
-from src.features.engineering import build_features, select_top_k
+from src.features.engineering import build_features, select_top_k, compute_metrics
 from src.evaluation.baselines import evaluate_baselines
 
 # --------------------
@@ -276,7 +276,7 @@ if "run_analysis" not in st.session_state:
         )
 
         # --------------------
-        # Aba 5: Backtest & Estratégia (versão final, sem debug)
+        # Aba 5: Backtest & Estratégia
         # --------------------
         with tab5:
             st.header("📈 Backtest da Estratégia de Dividendos")
@@ -287,20 +287,20 @@ if "run_analysis" not in st.session_state:
 
             # Config
             top_k = 3
-            hold_period = 30  # em dias úteis (posições no índice de preços)
+            hold_period = 30
             start_date = pd.to_datetime("2018-01-01")
             end_date = pd.to_datetime("today")
             tickers_bt = list(available_tickers.keys())
             st.write(f"Tickers incluídos no backtest: {tickers_bt}")
 
             with st.spinner("Rodando backtest..."):
-                # 1) coletar preços (formato long -> wide)
+                # coletar preços (formato long -> wide)
                 df_prices = fetch_price_history(tickers_bt, start=start_date, end=end_date)
                 df_prices["date"] = pd.to_datetime(df_prices["date"])
                 df_prices = df_prices.sort_values(["ticker", "date"])
                 df_prices_wide = df_prices.pivot(index="date", columns="ticker", values="adj_close").sort_index()
 
-                # 2) criar previsões por ticker (mesma lógica sua)
+                # criar previsões por ticker
                 df_preds_list = []
                 for ticker in tickers_bt:
                     raw = fetch_data(ticker, f"{years}y")
@@ -319,96 +319,29 @@ if "run_analysis" not in st.session_state:
 
                 df_all_preds = pd.concat(df_preds_list, ignore_index=True)
 
-                # 3) selecionar top-k por período
+                # selecionar top-k por período
                 df_topk = select_top_k(df_all_preds, k=top_k, by="dividend_pred")
 
-                # 4) função robusta de simulação (gera retornos DIÁRIOS, agrupa overlaps)
-                def simulate_strategy_v2(df_wide, df_topk, hold_period=30):
-                    """
-                    df_wide: DataFrame (index=datetime, columns=tickers)
-                    df_topk: DataFrame com colunas ['quarter','ticker']
-                    Retorna: pd.Series de retornos DIÁRIOS (média dos tickers selecionados por dia)
-                    """
-                    series_list = []
+                # simular estratégia (usa df_prices_wide)
+                strategy_returns = simulate_strategy(df_prices_wide, df_topk, hold_period=hold_period)
 
-                    for quarter, group in df_topk.groupby("quarter"):
-                        # obter início do trimestre (pd.Period -> .start_time)
-                        try:
-                            start_date_q = quarter.start_time
-                        except Exception:
-                            start_date_q = pd.to_datetime(quarter)
-
-                        # localizar posição mais próxima no índice (searchsorted é compatível)
-                        pos = df_wide.index.searchsorted(start_date_q)
-                        if pos >= len(df_wide.index):
-                            continue
-
-                        end_pos = min(pos + hold_period, len(df_wide.index))
-                        tickers = [t for t in group["ticker"].tolist() if t in df_wide.columns]
-                        if not tickers:
-                            continue
-
-                        period_prices = df_wide.iloc[pos:end_pos][tickers]
-                        daily_returns = period_prices.pct_change().dropna(how="all")
-                        if daily_returns.empty:
-                            continue
-
-                        # média dos tickers selecionados por dia
-                        daily_mean = daily_returns.mean(axis=1)
-                        series_list.append(daily_mean)
-
-                    if not series_list:
-                        return pd.Series(dtype=float)
-
-                    # concat e agrupa por data (média quando houver overlap), ordena
-                    combined = pd.concat(series_list).groupby(level=0).mean().sort_index()
-                    combined.name = "strategy_return"
-                    return combined
-
-                # 5) simular estratégia (usa df_prices_wide)
-                strategy_returns = simulate_strategy_v2(df_prices_wide, df_topk, hold_period=hold_period)
-
-                # 6) benchmark (IBOV)
+                # benchmark (IBOV)
                 benchmark_prices = fetch_price_history(["^BVSP"], start=start_date, end=end_date)
                 benchmark_prices["date"] = pd.to_datetime(benchmark_prices["date"])
                 benchmark_prices = benchmark_prices.set_index("date").sort_index()
                 benchmark_returns = benchmark_prices["adj_close"].pct_change().dropna()
 
-                # 7) métricas (CAGR, Sharpe e Max Drawdown) - sem debug
-                def compute_metrics(returns):
-                    if returns.empty:
-                        return {"CAGR": np.nan, "Sharpe": np.nan, "Max Drawdown": np.nan}
-
-                    # n_years a partir do período coberto pela série
-                    if isinstance(returns.index, pd.DatetimeIndex) and len(returns.index) > 1:
-                        days = (returns.index.max() - returns.index.min()).days
-                        n_years = max(days / 365.25, 1/252)
-                    else:
-                        n_years = max(len(returns) / 252, 1/252)
-
-                    total_return = (1 + returns).prod()
-                    CAGR = total_return ** (1 / n_years) - 1
-
-                    # Sharpe annualizado (assume risk-free = 0)
-                    sharpe = returns.mean() / (returns.std() if returns.std() > 0 else np.nan) * np.sqrt(252)
-
-                    # Max Drawdown
-                    cumulative = (1 + returns).cumprod()
-                    max_dd = (cumulative / cumulative.cummax() - 1).min()
-
-                    return {"CAGR": CAGR, "Sharpe": sharpe, "Max Drawdown": max_dd}
-
+                # métricas (CAGR, Sharpe e Max Drawdown)
                 strategy_metrics_dict = compute_metrics(strategy_returns)
                 benchmark_metrics_dict = compute_metrics(benchmark_returns)
 
-            # --------------------
-            # Exibir resultados (limpo, sem debug)
-            # --------------------
+            # Exibir resultados
             # formatar: CAGR e Max Drawdown em %, Sharpe sem %
             df_metrics = pd.DataFrame([strategy_metrics_dict, benchmark_metrics_dict],
                                     index=["Estratégia", "Benchmark"])
 
             display = df_metrics.copy()
+            
             # formatar percentuais
             display["CAGR"] = (display["CAGR"] * 100).round(2)
             display["Max Drawdown"] = (display["Max Drawdown"] * 100).round(2)
