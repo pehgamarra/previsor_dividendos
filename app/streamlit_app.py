@@ -6,10 +6,10 @@ import yfinance as yf
 from sklearn.metrics import mean_absolute_error
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.models.modeling import bootstrap_ci, economic_eval, ensemble_predictions, train_model
-from src.data.fetch import fetch_data
+from src.models.modeling import bootstrap_ci, economic_eval, train_model, strategy_metrics, simulate_strategy
+from src.data.fetch import fetch_data, fetch_price_history
 from src.data.preprocess import preprocess_quarterly
-from src.features.engineering import build_features
+from src.features.engineering import build_features, select_top_k
 from src.evaluation.baselines import evaluate_baselines
 
 # --------------------
@@ -68,7 +68,7 @@ if "run_analysis" not in st.session_state:
     # --------------------
     # Abas
     # --------------------
-    tab1, tab2, tab3, tab4 = st.tabs(["📈 Dividendos", "🏢 Empresa", "📖 Glossário & Dicas", "🖥️Modelagem"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dividendos", "🏢 Empresa", "📖 Glossário & Dicas", "🖥️Modelagem", "🧹Backtest"])
 
     # --------------------
     # Aba 1: Dividendos
@@ -273,5 +273,96 @@ if "run_analysis" not in st.session_state:
             file_name=f"{ticker}_predictions.csv",
             mime="text/csv"
         )
+
+    # --------------------
+    # Aba 5: Backtest & Estratégia
+    # --------------------
+    tab5 = st.tabs(["📊 Backtest & Estratégia"])[0]
+
+    with tab5:
+        st.header("📈 Backtest da Estratégia de Dividendos")
+        st.markdown("""
+        Esta aba simula uma estratégia simples: a cada período, selecionamos os top-k tickers por previsão de dividendos,
+        compramos e mantemos por um período definido, e comparamos com benchmark.
+        """)
+
+        # --------------------
+        # Configurações do usuário
+        # --------------------
+        st.sidebar.subheader("Configurações do Backtest")
+        top_k = st.sidebar.number_input("Top-K tickers por período", min_value=1, max_value=10, value=3, step=1)
+        hold_period = st.sidebar.number_input("Período de manutenção (dias)", min_value=1, max_value=180, value=30, step=1)
+        start_date = st.sidebar.date_input("Data inicial do backtest", value=pd.to_datetime("2018-01-01"))
+        end_date = st.sidebar.date_input("Data final do backtest", value=pd.to_datetime("today"))
+        
+        tickers_bt = list(available_tickers.keys())  # ou você pode criar seleção múltipla via multiselect
+        st.write(f"Tickers incluídos no backtest: {tickers_bt}")
+
+        run_bt = st.sidebar.button("🔎 Rodar Backtest")
+
+        if run_bt:
+            with st.spinner("Rodando backtest..."):
+                # 1️⃣ Coletar preços históricos
+                df_prices = fetch_price_history(tickers_bt, start=start_date, end=end_date)
+
+                # 2️⃣ Criar DataFrame com todas previsões (você pode usar preds do modelo Ridge)
+                df_preds_list = []
+                for ticker in tickers_bt:
+                    raw = fetch_data(ticker, f"{years}y")
+                    quarterly = preprocess_quarterly(raw, ticker)
+                    features = build_features(quarterly).dropna(axis=1, how="all")
+                    features = features.fillna(features.median(numeric_only=True))
+                    X = features.drop(columns=["dividend", "quarter"])
+                    y = features["dividend"]
+                    preds, _ = train_model(X, y, model_type="ridge", n_splits=10)
+                    df_pred = pd.DataFrame({
+                        "quarter": features["quarter"],
+                        "ticker": ticker,
+                        "dividend_pred": preds
+                    })
+                    df_preds_list.append(df_pred)
+
+                df_all_preds = pd.concat(df_preds_list, ignore_index=True)
+
+                # 3️⃣ Selecionar top-k por período
+                df_topk = select_top_k(df_all_preds, k=top_k, by="dividend_pred")
+
+                # 4️⃣ Simular retorno da estratégia
+                strategy_returns = simulate_strategy(df_prices, df_topk, hold_period=hold_period)
+
+                # 5️⃣ Simular benchmark (IBOV ou SP500)
+                benchmark_prices = yf.download("^BVSP", start=start_date, end=end_date, progress=False)["Adj Close"]
+                benchmark_returns = benchmark_prices.pct_change().dropna()
+
+                # 6️⃣ Calcular métricas
+                strategy_metrics_dict = strategy_metrics(strategy_returns)
+                benchmark_metrics_dict = strategy_metrics(benchmark_returns)
+
+            # --------------------
+            # Resultados
+            # --------------------
+            st.subheader("📊 Métricas da Estratégia vs Benchmark")
+            st.table(pd.DataFrame([strategy_metrics_dict, benchmark_metrics_dict],
+                                index=["Estratégia", "Benchmark"]).apply(lambda x: (x*100).round(2)))
+
+            # --------------------
+            # Gráfico de retorno acumulado
+            # --------------------
+            cum_strategy = (1 + strategy_returns).cumprod()
+            cum_benchmark = (1 + benchmark_returns).cumprod()
+            cum_df = pd.DataFrame({
+                "Estratégia": cum_strategy,
+                "Benchmark": cum_benchmark
+            })
+            st.subheader("📈 Retorno Acumulado")
+            st.line_chart(cum_df)
+
+            # --------------------
+            # Tabela com top-k tickers por período
+            # --------------------
+            st.subheader("📋 Top-K Tickers por Período")
+            with st.expander("Mostrar tabela completa"):
+                st.dataframe(df_topk, use_container_width=True)
+
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")
