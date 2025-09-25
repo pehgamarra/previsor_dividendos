@@ -1,4 +1,6 @@
-passo.txt
 *.log
 *.tmp
 *.vscode
+__pycache__/
+passo.txt
+.env
