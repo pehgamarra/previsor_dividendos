@@ -20,24 +20,51 @@ def fetch_data(ticker: str, period: str = "15y") -> pd.DataFrame:
 
 
 # Função para coletar preços ajustados históricos
+
 def fetch_price_history(tickers, start, end):
     """
-    Retorna DataFrame com preços ajustados históricos.
-    
-    Args:
-        tickers (list): lista de tickers
-        start (str): data inicial (YYYY-MM-DD)
-        end (str): data final (YYYY-MM-DD)
-    
-    Returns:
-        pd.DataFrame: ['date', 'ticker', 'adj_close']
+    Baixa preços ajustados de um ou mais tickers.
+    Tenta 'Adj Close', se não existir, usa 'Close'.
+    Retorna DataFrame com datas como índice e tickers como colunas.
     """
-    all_prices = []
+
+    if isinstance(tickers, str):
+        tickers = [tickers]
+
+    price_dfs = []
+
     for ticker in tickers:
-        df = yf.download(ticker, start=start, end=end, progress=False)[["Adj Close"]]
-        df = df.reset_index()
-        df["ticker"] = ticker
-        df.rename(columns={"Adj Close": "adj_close"}, inplace=True)
-        all_prices.append(df)
-    return pd.concat(all_prices, ignore_index=True)
+        df = yf.download(ticker, start=start, end=end, progress=False)
+
+        if df.empty:
+            print(f"Aviso: Nenhum dado para {ticker}")
+            continue
+
+        # Tenta 'Adj Close' primeiro
+        if 'Adj Close' in df.columns:
+            series = df['Adj Close']
+        elif 'Close' in df.columns:
+            series = df['Close']
+        else:
+            print(f"Aviso: '{ticker}' não tem 'Adj Close' nem 'Close'. Ignorando.")
+            continue
+
+        series.name = ticker  # nome da coluna
+        price_dfs.append(series)
+
+    if not price_dfs:
+        raise ValueError("Nenhum dado válido retornado para os tickers informados.")
+
+    # Combina todos os tickers
+    df_prices = pd.concat(price_dfs, axis=1)
+    df_prices = df_prices.sort_index()
+    
+    # Transformar para formato longo
+    df_prices_long = df_prices.reset_index().melt(
+        id_vars="Date",
+        var_name="ticker",
+        value_name="adj_close"
+    ).rename(columns={"Date": "date"})
+    
+    return df_prices_long
 

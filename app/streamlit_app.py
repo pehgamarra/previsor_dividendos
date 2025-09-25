@@ -2,6 +2,7 @@ import sys
 import os
 import streamlit as st
 import pandas as pd
+import numpy as np
 import yfinance as yf
 from sklearn.metrics import mean_absolute_error
 
@@ -274,38 +275,32 @@ if "run_analysis" not in st.session_state:
             mime="text/csv"
         )
 
-    # --------------------
-    # Aba 5: Backtest & Estratégia
-    # --------------------
-    tab5 = st.tabs(["📊 Backtest & Estratégia"])[0]
-
-    with tab5:
-        st.header("📈 Backtest da Estratégia de Dividendos")
-        st.markdown("""
-        Esta aba simula uma estratégia simples: a cada período, selecionamos os top-k tickers por previsão de dividendos,
-        compramos e mantemos por um período definido, e comparamos com benchmark.
-        """)
-
         # --------------------
-        # Configurações do usuário
+        # Aba 5: Backtest & Estratégia (versão final, sem debug)
         # --------------------
-        st.sidebar.subheader("Configurações do Backtest")
-        top_k = st.sidebar.number_input("Top-K tickers por período", min_value=1, max_value=10, value=3, step=1)
-        hold_period = st.sidebar.number_input("Período de manutenção (dias)", min_value=1, max_value=180, value=30, step=1)
-        start_date = st.sidebar.date_input("Data inicial do backtest", value=pd.to_datetime("2018-01-01"))
-        end_date = st.sidebar.date_input("Data final do backtest", value=pd.to_datetime("today"))
-        
-        tickers_bt = list(available_tickers.keys())  # ou você pode criar seleção múltipla via multiselect
-        st.write(f"Tickers incluídos no backtest: {tickers_bt}")
+        with tab5:
+            st.header("📈 Backtest da Estratégia de Dividendos")
+            st.markdown("""
+            Estratégia automática: a cada período, selecionamos os top-3 tickers por previsão de dividendos,
+            mantemos por 30 dias, e comparamos com benchmark.
+            """)
 
-        run_bt = st.sidebar.button("🔎 Rodar Backtest")
+            # Config
+            top_k = 3
+            hold_period = 30  # em dias úteis (posições no índice de preços)
+            start_date = pd.to_datetime("2018-01-01")
+            end_date = pd.to_datetime("today")
+            tickers_bt = list(available_tickers.keys())
+            st.write(f"Tickers incluídos no backtest: {tickers_bt}")
 
-        if run_bt:
             with st.spinner("Rodando backtest..."):
-                # 1️⃣ Coletar preços históricos
+                # 1) coletar preços (formato long -> wide)
                 df_prices = fetch_price_history(tickers_bt, start=start_date, end=end_date)
+                df_prices["date"] = pd.to_datetime(df_prices["date"])
+                df_prices = df_prices.sort_values(["ticker", "date"])
+                df_prices_wide = df_prices.pivot(index="date", columns="ticker", values="adj_close").sort_index()
 
-                # 2️⃣ Criar DataFrame com todas previsões (você pode usar preds do modelo Ridge)
+                # 2) criar previsões por ticker (mesma lógica sua)
                 df_preds_list = []
                 for ticker in tickers_bt:
                     raw = fetch_data(ticker, f"{years}y")
@@ -324,45 +319,126 @@ if "run_analysis" not in st.session_state:
 
                 df_all_preds = pd.concat(df_preds_list, ignore_index=True)
 
-                # 3️⃣ Selecionar top-k por período
+                # 3) selecionar top-k por período
                 df_topk = select_top_k(df_all_preds, k=top_k, by="dividend_pred")
 
-                # 4️⃣ Simular retorno da estratégia
-                strategy_returns = simulate_strategy(df_prices, df_topk, hold_period=hold_period)
+                # 4) função robusta de simulação (gera retornos DIÁRIOS, agrupa overlaps)
+                def simulate_strategy_v2(df_wide, df_topk, hold_period=30):
+                    """
+                    df_wide: DataFrame (index=datetime, columns=tickers)
+                    df_topk: DataFrame com colunas ['quarter','ticker']
+                    Retorna: pd.Series de retornos DIÁRIOS (média dos tickers selecionados por dia)
+                    """
+                    series_list = []
 
-                # 5️⃣ Simular benchmark (IBOV ou SP500)
-                benchmark_prices = yf.download("^BVSP", start=start_date, end=end_date, progress=False)["Adj Close"]
-                benchmark_returns = benchmark_prices.pct_change().dropna()
+                    for quarter, group in df_topk.groupby("quarter"):
+                        # obter início do trimestre (pd.Period -> .start_time)
+                        try:
+                            start_date_q = quarter.start_time
+                        except Exception:
+                            start_date_q = pd.to_datetime(quarter)
 
-                # 6️⃣ Calcular métricas
-                strategy_metrics_dict = strategy_metrics(strategy_returns)
-                benchmark_metrics_dict = strategy_metrics(benchmark_returns)
+                        # localizar posição mais próxima no índice (searchsorted é compatível)
+                        pos = df_wide.index.searchsorted(start_date_q)
+                        if pos >= len(df_wide.index):
+                            continue
+
+                        end_pos = min(pos + hold_period, len(df_wide.index))
+                        tickers = [t for t in group["ticker"].tolist() if t in df_wide.columns]
+                        if not tickers:
+                            continue
+
+                        period_prices = df_wide.iloc[pos:end_pos][tickers]
+                        daily_returns = period_prices.pct_change().dropna(how="all")
+                        if daily_returns.empty:
+                            continue
+
+                        # média dos tickers selecionados por dia
+                        daily_mean = daily_returns.mean(axis=1)
+                        series_list.append(daily_mean)
+
+                    if not series_list:
+                        return pd.Series(dtype=float)
+
+                    # concat e agrupa por data (média quando houver overlap), ordena
+                    combined = pd.concat(series_list).groupby(level=0).mean().sort_index()
+                    combined.name = "strategy_return"
+                    return combined
+
+                # 5) simular estratégia (usa df_prices_wide)
+                strategy_returns = simulate_strategy_v2(df_prices_wide, df_topk, hold_period=hold_period)
+
+                # 6) benchmark (IBOV)
+                benchmark_prices = fetch_price_history(["^BVSP"], start=start_date, end=end_date)
+                benchmark_prices["date"] = pd.to_datetime(benchmark_prices["date"])
+                benchmark_prices = benchmark_prices.set_index("date").sort_index()
+                benchmark_returns = benchmark_prices["adj_close"].pct_change().dropna()
+
+                # 7) métricas (CAGR, Sharpe e Max Drawdown) - sem debug
+                def compute_metrics(returns):
+                    if returns.empty:
+                        return {"CAGR": np.nan, "Sharpe": np.nan, "Max Drawdown": np.nan}
+
+                    # n_years a partir do período coberto pela série
+                    if isinstance(returns.index, pd.DatetimeIndex) and len(returns.index) > 1:
+                        days = (returns.index.max() - returns.index.min()).days
+                        n_years = max(days / 365.25, 1/252)
+                    else:
+                        n_years = max(len(returns) / 252, 1/252)
+
+                    total_return = (1 + returns).prod()
+                    CAGR = total_return ** (1 / n_years) - 1
+
+                    # Sharpe annualizado (assume risk-free = 0)
+                    sharpe = returns.mean() / (returns.std() if returns.std() > 0 else np.nan) * np.sqrt(252)
+
+                    # Max Drawdown
+                    cumulative = (1 + returns).cumprod()
+                    max_dd = (cumulative / cumulative.cummax() - 1).min()
+
+                    return {"CAGR": CAGR, "Sharpe": sharpe, "Max Drawdown": max_dd}
+
+                strategy_metrics_dict = compute_metrics(strategy_returns)
+                benchmark_metrics_dict = compute_metrics(benchmark_returns)
 
             # --------------------
-            # Resultados
+            # Exibir resultados (limpo, sem debug)
             # --------------------
+            # formatar: CAGR e Max Drawdown em %, Sharpe sem %
+            df_metrics = pd.DataFrame([strategy_metrics_dict, benchmark_metrics_dict],
+                                    index=["Estratégia", "Benchmark"])
+
+            display = df_metrics.copy()
+            # formatar percentuais
+            display["CAGR"] = (display["CAGR"] * 100).round(2)
+            display["Max Drawdown"] = (display["Max Drawdown"] * 100).round(2)
+            display["Sharpe"] = display["Sharpe"].round(3)
+
             st.subheader("📊 Métricas da Estratégia vs Benchmark")
-            st.table(pd.DataFrame([strategy_metrics_dict, benchmark_metrics_dict],
-                                index=["Estratégia", "Benchmark"]).apply(lambda x: (x*100).round(2)))
+            st.table(display)
 
             # --------------------
-            # Gráfico de retorno acumulado
+            # Gráfico de retorno acumulado (alinha índices)
             # --------------------
-            cum_strategy = (1 + strategy_returns).cumprod()
-            cum_benchmark = (1 + benchmark_returns).cumprod()
+            all_idx = strategy_returns.index.union(benchmark_returns.index).sort_values()
+            cum_strategy = (1 + strategy_returns.reindex(all_idx).fillna(0)).cumprod()
+            cum_benchmark = (1 + benchmark_returns.reindex(all_idx).fillna(0)).cumprod()
+
             cum_df = pd.DataFrame({
                 "Estratégia": cum_strategy,
                 "Benchmark": cum_benchmark
-            })
+            }, index=all_idx)
+
             st.subheader("📈 Retorno Acumulado")
             st.line_chart(cum_df)
 
             # --------------------
-            # Tabela com top-k tickers por período
+            # Top-k por período (tabela)
             # --------------------
             st.subheader("📋 Top-K Tickers por Período")
             with st.expander("Mostrar tabela completa"):
                 st.dataframe(df_topk, use_container_width=True)
+
 
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")

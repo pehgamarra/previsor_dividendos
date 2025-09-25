@@ -99,38 +99,64 @@ def economic_eval(y_true, y_pred, debug=False):
     return returns.mean(), sharpe, max_drawdown
 
 
-#Função para simular retorno da estratégia
+# Função para simular retorno da estratégia
 # Simula o ganho percentual caso comprasse os tickers top-k e mantivesse por hold_period dias.
-
 def simulate_strategy(df_prices, df_topk, hold_period=30):
     """
-    Simula retorno de uma estratégia de compra dos tickers top-k.
-    
+    Simula retorno diário de uma estratégia de compra dos tickers top-k por período.
+
     Args:
-        df_prices (pd.DataFrame): preços ajustados históricos, colunas = ['date', 'ticker', 'adj_close']
-        df_topk (pd.DataFrame): top-k tickers por período, colunas = ['quarter', 'ticker']
+        df_prices (pd.DataFrame): preços ajustados históricos long (colunas: ['date', 'ticker', 'adj_close'])
+        df_topk (pd.DataFrame): top-k tickers por período (colunas: ['quarter', 'ticker'])
         hold_period (int): número de dias para manter posição
-    
+
     Returns:
-        pd.DataFrame: retorno diário ou por período da estratégia
+        pd.Series: retorno diário médio da estratégia
     """
+
+    # Transformar preços para formato wide
+    df_prices["date"] = pd.to_datetime(df_prices["date"])
+    df_wide = df_prices.pivot(index="date", columns="ticker", values="adj_close").sort_index()
+
     strategy_returns = []
 
     for quarter, group in df_topk.groupby("quarter"):
-        for ticker in group["ticker"]:
-            prices = df_prices[df_prices["ticker"] == ticker].set_index("date")["adj_close"]
-            if len(prices) < hold_period + 1:
-                continue
-            ret = (prices.shift(-hold_period) / prices - 1).dropna()
-            strategy_returns.append(ret)
+        tickers = group["ticker"].tolist()
+
+        # Obter início do período (primeiro dia do trimestre)
+        try:
+            start_date = quarter.start_time
+        except AttributeError:
+            start_date = quarter
+
+        # Garantir que start_date exista no índice ou pegar o mais próximo
+        if start_date not in df_wide.index:
+            # Escolher a data mais próxima
+            idx = df_wide.index.searchsorted(start_date)
+            if idx >= len(df_wide.index):
+                idx = len(df_wide.index) - 1
+            start_date = df_wide.index[idx]
+
+        # Definir fim do período
+        start_idx = df_wide.index.get_loc(start_date)
+        end_idx = start_idx + hold_period
+        period_prices = df_wide.iloc[start_idx:end_idx][tickers]
+
+        # Calcular retornos diários
+        daily_returns = period_prices.pct_change().dropna(how='all')
+        if daily_returns.empty:
+            continue
+
+        # Média dos tickers no período
+        daily_returns_mean = daily_returns.mean(axis=1)
+        strategy_returns.append(daily_returns_mean)
 
     if strategy_returns:
-        # Retorno médio entre os tickers
-        strategy_returns = pd.concat(strategy_returns, axis=1)
-        strategy_returns = strategy_returns.mean(axis=1)
+        strategy_returns = pd.concat(strategy_returns).sort_index()
+        strategy_returns.name = "strategy_return"
     else:
         strategy_returns = pd.Series(dtype=float)
-        
+
     return strategy_returns
 
 
