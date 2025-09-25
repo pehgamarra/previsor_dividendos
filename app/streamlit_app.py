@@ -150,32 +150,7 @@ if "run_analysis" not in st.session_state:
         col1.metric("Dividend Yield", f"{info.get('dividendYield', 0)*100:.2f}%")
         col2.metric("ROE", f"{info.get('returnOnEquity', 0)*100:.1f}%")
         col3.metric("Beta", f"{info.get('beta', 'N/A')}")
-
-        # --------------------
-        # Glossário didático
-        # --------------------
         st.markdown("---")
-        st.markdown("### 📚 Glossário"
-                      " (para iniciantes)")
-        glossario = {
-            "Preço atual": "Quanto custa uma ação hoje no mercado.",
-            "Valor de mercado (Market Cap)": "Valor total da empresa na bolsa (preço da ação x número de ações).",
-            "Receita Total": "Quanto a empresa vendeu em dinheiro (faturamento).",
-            "Margem Bruta": "Quanto sobra da receita depois de pagar custos diretos (quanto maior, melhor).",
-            "Margem Operacional": "Lucro da empresa sobre as vendas após despesas operacionais.",
-            "Dívida/Patrimônio": "Quanto a empresa deve em relação ao que ela tem. Número alto pode indicar risco.",
-            "Enterprise Value": "Valor total da empresa incluindo dívidas. Usado em comparações.",
-            "P/L (Preço/Lucro)": "Quantos anos de lucro a empresa precisaria para valer seu preço atual. Quanto menor, mais barata.",
-            "P/VP (Preço/Valor Patrimonial)": "Mostra se a ação vale mais ou menos do que o patrimônio da empresa.",
-            "Forward P/E": "P/L projetado com base nos lucros futuros estimados.",
-            "Dividend Yield": "Quanto a empresa paga em dividendos em relação ao preço da ação (como se fosse 'juros').",
-            "ROE (Retorno sobre Patrimônio)": "Mede se a empresa usa bem o dinheiro dos acionistas para gerar lucro.",
-            "Beta": "Mostra o risco da ação comparado ao mercado. 1 = acompanha o mercado, >1 = mais volátil."
-        }
-
-        for metrica, explicacao in glossario.items():
-            st.markdown(f"**{metrica}:** {explicacao}")
- 
     # --------------------
     # Aba 3: Glossário & Dicas
     # --------------------
@@ -232,102 +207,71 @@ if "run_analysis" not in st.session_state:
         else:
             st.markdown("Analise o histórico de dividendos, compare com empresas do mesmo setor e avalie se o perfil de risco combina com você.")
 
-    # --------------------
+   # --------------------
     # Aba 4: Modelagem
     # -------------------- 
-
     with tab4:
         st.header("🤖 Modelagem de Dividendos")
-        st.markdown("Treine modelos e avalie previsões com intervalos de confiança e impacto econômico.")
+        st.markdown("Treinamento com o modelo Ridge avalia previsões com intervalos de confiança e impacto econômico.")
+
+        n_splits = 10  # TimeSeriesSplit fixox
 
         # ------------------------
-        # Inicializar session_state
+        # Preparar features
         # ------------------------
-        if "run_model" not in st.session_state:
-            st.session_state.run_model = False
-        if "model_option" not in st.session_state:
-            st.session_state.model_option = "Ridge"
-        if "preds_dict" not in st.session_state:
-            st.session_state.preds_dict = {}
-        if "df_pred" not in st.session_state:
-            st.session_state.df_pred = pd.DataFrame()
+        features = build_features(quarterly)
+        features = features.dropna(axis=1, how="all")
+        features = features.fillna(features.median(numeric_only=True))
+        X = features.drop(columns=["dividend", "quarter"])
+        y = features["dividend"]
 
         # ------------------------
-        # Seleção do modelo
+        # Treinar modelo
         # ------------------------
-        st.session_state.model_option = st.selectbox(
-            "Escolha o modelo:",
-            ["Ridge", "RandomForest", "XGBoost", "LightGBM", "Ensemble"],
-            index=["Ridge","RandomForest","XGBoost","LightGBM","Ensemble"].index(st.session_state.model_option)
+        with st.spinner("Treinando modelo Ridge..."):
+            preds, mae = train_model(X, y, model_type="ridge", n_splits=n_splits)
+            preds = preds.ffill().bfill()  # evita FutureWarning
+
+            df_pred = pd.DataFrame({
+                "quarter": features["quarter"],
+                "dividend_real": y,
+                "dividend_pred": preds
+            })
+
+        # Intervalos de confiança
+        lower, upper = bootstrap_ci(df_pred["dividend_real"], df_pred["dividend_pred"])
+        df_pred["ci_lower"] = lower
+        df_pred["ci_upper"] = upper
+        df_pred["quarter_dt"] = df_pred["quarter"].dt.to_timestamp()
+
+        # Avaliação econômica
+        mean_ret, sharpe, max_drawdown = economic_eval(df_pred["dividend_real"], df_pred["dividend_pred"])
+        st.markdown("---")
+        mae_val = mean_absolute_error(df_pred['dividend_real'], df_pred['dividend_pred'])
+        mean_ret_pct = mean_ret * 100
+        sharpe_val = sharpe
+        max_dd_pct = max_drawdown * 100
+
+        # Exibir 
+        st.markdown("### Resultados")
+        st.metric("MAE (aprox)", f"{mae_val:.4f}")
+        st.metric("Retorno médio", f"{mean_ret_pct:.2f}%")
+        st.metric("Sharpe ratio", f"{sharpe_val:.2f}")
+        st.metric("Max Drawdown", f"{max_dd_pct:.2f}%")
+        st.markdown("---")
+
+        #Gráfico de previsões x real
+        st.subheader("📊 Previsões x Real com intervalo de confiança")
+        st.line_chart(df_pred.set_index("quarter_dt")[["dividend_real", "dividend_pred"]])
+        # Tabela de previsões
+        with st.expander("📋 Mostrar tabela completa de previsões"):
+            st.dataframe(df_pred, use_container_width=True)   
+        # Download
+        st.download_button(
+            "💾 Baixar previsões CSV",
+            data=df_pred.to_csv(index=False),
+            file_name=f"{ticker}_predictions.csv",
+            mime="text/csv"
         )
-        n_splits = st.slider("Número de splits TimeSeriesSplit:", 3, 10, 5)
-
-        # ------------------------
-        # Botão de execução
-        # ------------------------
-        if st.button("🔎 Rodar previsão"):
-            st.session_state.run_model = True
-
-            features = build_features(quarterly)
-            X = features.drop(columns=["dividend", "quarter"])
-            y = features["dividend"]
-
-            with st.spinner("Treinando modelo(s)..."):
-                preds_dict = {}
-                if st.session_state.model_option != "Ensemble":
-                    mtype = st.session_state.model_option.lower().replace("lightgbm", "lgb").replace("xgboost","xgb").replace("randomforest","rf")
-                    preds, mae = train_model(X, y, model_type=mtype, n_splits=n_splits)
-                    preds_dict[st.session_state.model_option] = preds
-                    st.session_state.df_pred = pd.DataFrame({
-                        "quarter": features["quarter"],
-                        "dividend_real": y,
-                        "dividend_pred": preds
-                    })
-                else:
-                    for m in ["ridge","rf","xgb","lgb"]:
-                        preds, _ = train_model(X, y, model_type=m, n_splits=n_splits)
-                        preds_dict[m.upper()] = preds
-                    ensemble_preds = ensemble_predictions(preds_dict)
-                    st.session_state.df_pred = pd.DataFrame({
-                        "quarter": features["quarter"],
-                        "dividend_real": y,
-                        "dividend_pred": ensemble_preds
-                    })
-
-                st.session_state.preds_dict = preds_dict
-
-        # ------------------------
-        # Mostrar resultados
-        # ------------------------
-        if st.session_state.run_model and not st.session_state.df_pred.empty:
-            df_pred = st.session_state.df_pred
-
-            # Intervalos de confiança
-            lower, upper = bootstrap_ci(df_pred["dividend_real"], df_pred["dividend_pred"])
-            df_pred["ci_lower"] = lower
-            df_pred["ci_upper"] = upper
-
-            # Avaliação econômica
-            mean_ret, sharpe, drawdown = economic_eval(df_pred["dividend_real"], df_pred["dividend_pred"])
-
-            st.success("✅ Modelo treinado!")
-            
-            st.metric("MAE (aprox)", f"{mean_absolute_error(df_pred['dividend_real'], df_pred['dividend_pred']):.4f}")
-            st.metric("Retorno médio", f"{mean_ret:.4f}")
-            st.metric("Sharpe ratio", f"{sharpe:.2f}")
-            st.metric("Max Drawdown", f"{drawdown:.2f}")
-
-            st.subheader("📊 Previsões x Real com intervalo de confiança")
-            st.line_chart(df_pred.set_index("quarter")[["dividend_real", "dividend_pred"]])
-            st.dataframe(df_pred, use_container_width=True)
-
-            st.download_button(
-                "💾 Baixar previsões CSV",
-                data=df_pred.to_csv(index=False),
-                file_name=f"{ticker}_predictions.csv",
-                mime="text/csv"
-            )
-
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")
- 
