@@ -300,7 +300,7 @@ if "run_analysis" not in st.session_state:
                 st.table(display)
 
                 # --------------------
-                # Gráfico de retorno acumulado (alinha índices)
+                # Gráfico de retorno acumulado
                 # --------------------
                 all_idx = strategy_returns.index.union(benchmark_returns.index).sort_values()
                 cum_strategy = (1 + strategy_returns.reindex(all_idx).fillna(0)).cumprod()

@@ -1,5 +1,6 @@
 import pandas as pd
 
+# Data preprocessing functions
 def preprocess_quarterly(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """
     Transforma dados diários em dataset trimestral com alvos.

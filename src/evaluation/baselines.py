@@ -2,15 +2,19 @@ import numpy as np
 import pandas as pd
 from sklearn.model_selection import TimeSeriesSplit
 
-# ----- Baselines (aplicar sobre o df completo) -----
+# Baselines simples para séries temporais de dividendos
+
+#----- Baselines -----
 def baseline_last(df):
     """Previsão = último dividendo observado (t-1)."""
     return df["dividend"].shift(1)
 
+# Média móvel dos últimos 4 pagamentos
 def baseline_mean4(df):
     """Previsão = média dos últimos 4 pagamentos (shiftada para frente)."""
     return df["dividend"].rolling(4).mean().shift(1)
 
+# Regra simples baseada em payout (se existir EPS)
 def baseline_rule_based(df):
     """
     Exemplo simples: usar payout médio (se existir EPS).
@@ -25,13 +29,15 @@ def baseline_rule_based(df):
     else:
         return baseline_last(df)
 
-# ----- Métricas (implementadas com numpy para compatibilidade) -----
+# Funções de métrica
 def compute_mae(y_true, y_pred):
     return np.mean(np.abs(y_true - y_pred))
 
+# Funções de avaliação
 def compute_rmse(y_true, y_pred):
     return np.sqrt(np.mean((y_true - y_pred) ** 2))
 
+# Função para calcular MAPE, evitando divisão por zero
 def compute_mape(y_true, y_pred):
     # evita divisão por zero
     mask = y_true != 0
@@ -39,6 +45,7 @@ def compute_mape(y_true, y_pred):
         return np.nan
     return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask])) * 100
 
+# Função segura para avaliação
 def safe_eval(y_true, y_pred):
     """
     Recebe duas Series (pandas) possivelmente com NaNs, alinha e calcula MAE/RMSE/MAPE.
@@ -55,7 +62,7 @@ def safe_eval(y_true, y_pred):
     mape = compute_mape(y_t, y_p)
     return mae, rmse, mape
 
-# ----- Avaliação com TimeSeriesSplit -----
+# Função TimeSeriesSplit para avaliação temporal
 def evaluate_baselines(df, n_splits=5):
     """
     Avalia os baselines com validação temporal (TimeSeriesSplit).

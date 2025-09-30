@@ -1,18 +1,14 @@
 import numpy as np
 import pandas as pd
-import lightgbm as lgb
-import xgboost as xgb
 
 from sklearn.linear_model import Ridge
-from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import TimeSeriesSplit
 from sklearn.metrics import mean_absolute_error
 from sklearn.impute import SimpleImputer
 
+# Função para treinar e avaliar modelos de séries temporais
 
-# -----------------------
 # Treinar modelo
-# -----------------------
 def train_model(X, y, model_type="ridge", n_splits=5):
     X_proc = pd.get_dummies(X, drop_first=True)
     X_proc = X_proc.fillna(0)
@@ -31,12 +27,6 @@ def train_model(X, y, model_type="ridge", n_splits=5):
 
         if model_type == "ridge":
             model = Ridge()
-        elif model_type == "rf":
-            model = RandomForestRegressor(n_estimators=100, random_state=42)
-        elif model_type == "xgb":
-            model = xgb.XGBRegressor(n_estimators=100, random_state=42)
-        elif model_type == "lgb":
-            model = lgb.LGBMRegressor(n_estimators=100, random_state=42)
         else:
             raise ValueError("Modelo não suportado")
 
@@ -45,12 +35,9 @@ def train_model(X, y, model_type="ridge", n_splits=5):
         preds.update(y_pred)
         maes.append(mean_absolute_error(y_test, y_pred))
 
-    return preds, np.mean(maes)
+    return preds, np.mean(maes), model
 
-
-# -----------------------
 # Ensemble simples
-# -----------------------
 def ensemble_predictions(preds_dict, weights=None):
     if weights is None:
         weights = {k: 1 for k in preds_dict.keys()}
@@ -58,9 +45,7 @@ def ensemble_predictions(preds_dict, weights=None):
     weighted_preds = sum(all_preds[col] * weights[col] for col in all_preds.columns) / sum(weights.values())
     return weighted_preds
 
-# -----------------------
 # Intervalos de confiança (bootstrap)
-# -----------------------
 def bootstrap_ci(y_true, y_pred, n_bootstrap=500, ci=0.9):
     preds_matrix = np.zeros((len(y_pred), n_bootstrap))
     n = len(y_true)
@@ -74,10 +59,8 @@ def bootstrap_ci(y_true, y_pred, n_bootstrap=500, ci=0.9):
     upper = np.percentile(preds_matrix, (1 + ci) / 2 * 100, axis=1)
     return lower, upper
 
-# -----------------------
 # Avaliação econômica
-# -----------------------
-def economic_eval(y_true, y_pred, debug=False):
+def economic_eval(y_true, y_pred):
     df = pd.DataFrame({"y_true": y_true, "y_pred": y_pred}).dropna()
 
     # evita divisões por zero ou retornos inválidos
@@ -98,6 +81,7 @@ def economic_eval(y_true, y_pred, debug=False):
     sharpe = (returns.mean() / returns.std() * np.sqrt(4)) if returns.std() > 0 else 0.0
     return returns.mean(), sharpe, max_drawdown
 
+# Simulação de estratégia
 def simulate_strategy(df_wide, df_topk, hold_period=30):
     """
     df_wide: DataFrame (index=datetime, columns=tickers)
@@ -107,13 +91,13 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
     series_list = []
 
     for quarter, group in df_topk.groupby("quarter"):
-    # obter início do trimestre (pd.Period -> .start_time)
+        # obter início do trimestre (pd.Period -> .start_time)
         try:
             start_date_q = quarter.start_time
         except Exception:
             start_date_q = pd.to_datetime(quarter)
 
-    # localizar posição mais próxima no índice (searchsorted é compatível)
+        # localizar posição mais próxima no índice (searchsorted é compatível)
         pos = df_wide.index.searchsorted(start_date_q)
         if pos >= len(df_wide.index):
             continue
@@ -132,10 +116,11 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
         daily_mean = daily_returns.mean(axis=1)
         series_list.append(daily_mean)
 
-        if not series_list:
-            return pd.Series(dtype=float)
+    # ===== ESTAS LINHAS DEVEM ESTAR FORA DO LOOP =====
+    if not series_list:
+        return pd.Series(dtype=float)
 
-        # concat e agrupa por data (média quando houver overlap), ordena
-        combined = pd.concat(series_list).groupby(level=0).mean().sort_index()
-        combined.name = "strategy_return"
+    # concat e agrupa por data (média quando houver overlap), ordena
+    combined = pd.concat(series_list).groupby(level=0).mean().sort_index()
+    combined.name = "strategy_return"
     return combined

@@ -1,44 +1,55 @@
 import pandas as pd
 import numpy as np
 
+# Feature engineering para previsão de dividendos
+
+# Criação de features temporais e financeiras
 def add_dividend_lags(df, lags=[1,2,3]):
     for lag in lags:
         df[f"dividend_lag_{lag}"] = df["dividend"].shift(lag)
     return df
 
+# Médias móveis
 def add_moving_averages(df):
     df["dividend_ma_3"] = df["dividend"].rolling(3).mean()
     df["dividend_ma_6"] = df["dividend"].rolling(6).mean()
     df["dividend_ma_12"] = df["dividend"].rolling(12).mean()
     return df
 
+# Tendência de dividendos
 def add_trend_features(df):
     df["dividend_trend"] = df["dividend"].pct_change().rolling(4).mean()
     return df
 
+# Índices financeiros
 def add_payout_ratio(df):
     if "eps" in df.columns:
         df["payout_ratio"] = df["dividend"] / df["eps"]
     return df
 
+# Razões de liquidez e endividamento
 def add_liquidity_debt_ratios(df):
     df["debt_to_equity"] = np.nan
     df["current_ratio"] = np.nan
     return df
 
+# Volatilidade histórica
 def add_volatility(df, windows=[30,90]):
     for w in windows:
         df[f"vol_{w}d"] = df["close"].pct_change().rolling(w).std()
     return df
 
+# Dummies para trimestres
 def add_quarter_dummies(df):
     df = pd.concat([df, pd.get_dummies(df["quarter"].dt.quarter, prefix="Q")], axis=1)
     return df
 
+# Tempo desde o último dividendo
 def add_time_since_last_dividend(df):
     df["time_since_last_dividend"] = df["dividend"].apply(lambda x: 0 if x>0 else 1).cumsum()
     return df
 
+# Pipeline completo de engenharia de features
 def build_features(df):
     df = add_dividend_lags(df)
     df = add_moving_averages(df)
@@ -69,7 +80,7 @@ def select_top_k(df_preds, k=3, by="dividend_pred"):
         top_k_list.append(top_k)
     return pd.concat(top_k_list).reset_index(drop=True)
 
-
+# Métricas de performance
 def compute_metrics(returns):
     if returns.empty:
         return {"CAGR": np.nan, "Sharpe": np.nan, "Max Drawdown": np.nan}

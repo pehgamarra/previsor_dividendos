@@ -1,6 +1,9 @@
 import yfinance as yf
 import pandas as pd
 
+#Fetching data functions
+
+# Função para coletar dados históricos de preços e dividendos
 def fetch_data(ticker: str, period: str = "15y") -> pd.DataFrame:
     """
     Coleta preços e dividendos de um ticker usando yfinance.
@@ -18,9 +21,7 @@ def fetch_data(ticker: str, period: str = "15y") -> pd.DataFrame:
 
     return data
 
-
 # Função para coletar preços ajustados históricos
-
 def fetch_price_history(tickers, start, end):
     """
     Baixa preços ajustados de um ou mais tickers.
