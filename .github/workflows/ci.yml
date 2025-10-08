@@ -33,3 +33,8 @@ jobs:
       - name: Run unit tests
         run: |
           pytest -v --maxfail=1 --disable-warnings
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
