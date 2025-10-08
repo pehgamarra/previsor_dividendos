@@ -1,5 +1,6 @@
 import sys
 import os
+from matplotlib import pyplot as plt
 from sklearn.impute import SimpleImputer
 import streamlit as st
 import pandas as pd
@@ -8,13 +9,13 @@ import yfinance as yf
 from sklearn.metrics import mean_absolute_error
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.models.modeling import bootstrap_ci, economic_eval, train_model, simulate_strategy
+from src.models.modeling import bootstrap_ci, economic_eval, train_model, simulate_strategy, forecast_future
 from src.data.fetch import fetch_data, fetch_price_history
 from src.data.preprocess import preprocess_quarterly
 from src.features.engineering import build_features, select_top_k, compute_metrics
 from src.evaluation.baselines import evaluate_baselines
 from src.evaluation.robustness import eval_robustness
-from src.models.explainability import compute_feature_importance, plot_feature_importance, shap_explain, plot_shap_summary, plot_shap_local
+from src.models.explainability import compute_feature_importance, plot_feature_importance, shap_explain, plot_shap_summary, plot_shap_local, plot_future_dividends
 
 # --------------------
 # Configuração inicial do Streamlit
@@ -44,13 +45,10 @@ ticker = st.sidebar.selectbox(
     format_func=lambda x: f"{x} - {available_tickers[x]}"
 )
 
-years = st.sidebar.slider(
-    "Período do histórico (anos):",
-    min_value=1,
-    max_value=30,
-    value=10,
-    step=1
-)
+st.sidebar.markdown("""
+---""")
+
+years = 10
 period = f"{years}y"
 
 # --------------------
@@ -66,10 +64,20 @@ if "run_analysis" not in st.session_state:
         info = yf_ticker.info
     st.success(f" ### {ticker} - {available_tickers[ticker]}")
 
+    st.sidebar.subheader("🏢 Dados da Empresa")
+    st.sidebar.write(f"**Nome:** {info.get('longName', ticker)}")
+    st.sidebar.write(f"**Setor:** {info.get('sector', 'N/A')}")
+    st.sidebar.write(f"**Indústria:** {info.get('industry', 'N/A')}")
+    st.sidebar.write(f"**País:** {info.get('country', 'N/A')}") 
+    st.sidebar.write(f"**Moeda:** {info.get('currency', 'N/A')}")
+    st.sidebar.metric("Preço atual", f"R$ {info.get('currentPrice', 'N/A')} ")
+    st.sidebar.markdown("Coletado via [yfinance](https://pypi.org/project/yfinance/) 🔎")
+    
+
     # --------------------
     # Abas
     # --------------------
-    tab1, tab2, tab3, tab4= st.tabs(["📈 Dividendos", "🏢 Empresa", "🧪 Validação do Modelo", "📖 Glossário & Dicas"])
+    tab1, tab2, tab3, tab4, tab5 = st.tabs(["📈 Dividendos", "🏢 Empresa", "🧪 Validação do Modelo", "📖 Glossário & Dicas", "🔮 Previsões"])
 
     # --------------------
     # Aba 1: Dividendos
@@ -77,22 +85,45 @@ if "run_analysis" not in st.session_state:
     with tab1:
         col1, col2 = st.columns([2, 1])
 
-        with col1:
-            st.subheader("📈 Dividendos ao longo do tempo")
-            st.line_chart(
-                quarterly.set_index("quarter")[["dividend", "close"]],
-                use_container_width=True
-            )
+    with col1:
+        st.subheader("📈 Dividendos ao longo do tempo")
+
+        # Se faltar 'quarter' mas houver 'date', tentamos reconstruir (não quebra o app)
+        if "quarter" not in quarterly.columns and "date" in quarterly.columns:
+            quarterly["quarter"] = pd.to_datetime(quarterly["date"], errors="coerce").dt.to_period("Q")
+
+        if "quarter" not in quarterly.columns:
+            st.warning("Coluna 'quarter' não encontrada — impossível plotar série temporal.")
+        else:
+            # Usar uma cópia só para o plot, para NÃO mexer no DataFrame original
+            plot_df = quarterly.copy()
+
+            # Converter Period -> Timestamp ou strings -> datetime com segurança
+            if str(plot_df["quarter"].dtype).startswith("period"):
+                plot_df["quarter"] = plot_df["quarter"].dt.to_timestamp()
+            else:
+                plot_df["quarter"] = pd.to_datetime(plot_df["quarter"], errors="coerce")
+
+            # Ordenar e usar o índice apenas na cópia para o gráfico
+            plot_df = plot_df.sort_values("quarter").set_index("quarter")
+
+            cols_to_plot = [c for c in ["dividend", "close"] if c in plot_df.columns]
+            if cols_to_plot:
+                st.line_chart(plot_df[cols_to_plot], use_container_width=True)
+            else:
+                st.warning("Colunas 'dividend' e 'close' não encontradas para plotar.")
+
 
         with col2:
             st.subheader("🔢 Estatísticas")
-            total = quarterly["dividend"].sum()
-            avg_yield = quarterly["dividend_yield"].mean() * 100
-            freq = quarterly["has_dividend"].mean() * 100
+            total = quarterly["dividend"].sum() if "dividend" in quarterly else 0
+            avg_yield = quarterly["dividend_yield"].mean() * 100 if "dividend_yield" in quarterly else 0
+            freq = quarterly["has_dividend"].mean() * 100 if "has_dividend" in quarterly else 0
 
             st.metric("Dividendos pagos (total)", f"{total:.2f}")
             st.metric("Yield médio", f"{avg_yield:.2f}%")
             st.metric("Frequência de pagamentos", f"{freq:.1f}% dos trimestres")
+
 
         st.subheader("📑 Histórico Trimestral")
         df_display = quarterly.copy()
@@ -100,22 +131,9 @@ if "run_analysis" not in st.session_state:
         st.dataframe(df_display, use_container_width=True, hide_index=True)
 
     with tab2:
-        st.subheader("🏢 Informações da Empresa")
-
-        # --------------------
-        # Resumo rápido
-        # --------------------
-        st.write(f"**Nome:** {info.get('longName', ticker)}")
-        st.write(f"**Setor:** {info.get('sector', 'N/A')}")
-        st.write(f"**Indústria:** {info.get('industry', 'N/A')}")
-        st.write(f"**País:** {info.get('country', 'N/A')} | **Moeda:** {info.get('currency', 'N/A')}")
-
-        st.metric("Preço atual", f"R$ {info.get('currentPrice', 'N/A')}")
-
         # --------------------
         # Saúde financeira
         # --------------------
-        st.markdown("---")
         st.markdown("### 🏦 Saúde Financeira")
         col1, col2, col3 = st.columns(3)
         col1.metric("Valor de mercado", f"{info.get('marketCap', 'N/A'):,}")
@@ -431,6 +449,36 @@ if "run_analysis" not in st.session_state:
             st.markdown("Empresas americanas de tecnologia tendem a reinvestir lucros em crescimento, pagando menos dividendos (exceto Coca-Cola).")
         else:
             st.markdown("Analise o histórico de dividendos, compare com empresas do mesmo setor e avalie se o perfil de risco combina com você.")
+    
+    
+        # --------------------
+        # Aba 5: Previsões Futuras
+        # --------------------
+
+        with tab5:
+            st.subheader("🔮 Previsões Futuras de Dividendos")
+            st.markdown("Visualização de previsões futuras usando o modelo treinado.")
+
+            try:
+                # --- Preparar últimas features do ticker ---
+                last_features = features.drop(columns=["dividend", "quarter"], errors="ignore").iloc[[-1]]
+                last_date = quarterly["quarter"].iloc[-1].to_timestamp()  # converte Period -> Timestamp
+                last_features.index = [last_date]  # transforma em DatetimeIndex
+
+                # --- Gerar previsões futuras ---
+                forecast_df = forecast_future(model, last_features, n_periods=4)
+
+                # Combina com histórico
+                historical_df = quarterly.set_index(quarterly["quarter"].dt.to_timestamp())
+                historical_df = df_pred.rename(columns={"dividend_real": "dividend"})
+                combined_df = pd.concat([historical_df[["dividend"]], forecast_df], axis=0)
+
+                # --- Gráfico ---
+                fig = plot_future_dividends(df_pred, forecast_df, ci_lower=forecast_df.get('ci_lower'), ci_upper=forecast_df.get('ci_upper'))
+                st.pyplot(fig)
+
+            except Exception as e:
+                st.warning(f"Não foi possível gerar previsões futuras: {e}")
 
     
 else:
