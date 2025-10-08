@@ -22,19 +22,17 @@ O projeto permite analisar a evolução dos dividendos de diferentes ações e g
 
 ## Estrutura do Projeto
 
-previsor de dividendos/
-│
+previsor_dividendos/
 ├── app/
-│ └── streamlit_app.py # Aplicativo principal do Streamlit
-│
+│   └── streamlit_app.py
 ├── src/
-│ ├── data/ # Pré-processamento de dados
-│ ├── evaluation/ # Funções de avaliação de modelos
-│ ├── feature/ # Transformações e features
-│ └── models/ # Modelos de previsão
-│
-├── tests/ # Testes unitários
-├── .github/workflows #CI.yml
+│   ├── data/
+│   ├── evaluation/
+│   ├── feature/
+│   └── models/
+├── tests/
+├── .github/
+│   └── workflows/
 ├── Dockerfile
 ├── requirements.txt
 └── .gitignore
@@ -59,7 +57,7 @@ streamlit run app/streamlit_app.py
 ### Executar com Docker
 docker build -t previsor de dividendos .
 docker run -p 8501:8501 previsor de dividendos
-
+```
 ---
 
 ## Deploy
