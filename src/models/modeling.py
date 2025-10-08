@@ -124,3 +124,39 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
     combined = pd.concat(series_list).groupby(level=0).mean().sort_index()
     combined.name = "strategy_return"
     return combined
+
+# Previsão futura (simples, baseado na última feature conhecida)
+def forecast_future(model, last_features, n_periods=4, freq="Q"):
+    """
+    Gera previsões futuras trimestrais usando o modelo já treinado.
+
+    model: modelo Ridge treinado
+    last_features: DataFrame com as últimas features do ticker (última linha)
+    n_periods: número de períodos futuros a prever
+    freq: frequência dos períodos ('Q' para trimestral)
+    """
+    # Criar uma cópia e remover colunas que não estavam no treino
+    current_features = last_features.copy()
+    if "ticker" in current_features.columns:
+        current_features = current_features.drop(columns=["ticker"])
+    
+    future_preds = []
+
+    for _ in range(n_periods):
+        # Previsão para o período atual
+        pred = model.predict(current_features)[0]
+        future_preds.append(pred)
+        
+        # Atualiza features para o próximo período: shift e preencher NaNs com 0
+        current_features = current_features.shift(1).fillna(0)
+
+    # Garantir que o índice seja datetime
+    last_date = pd.to_datetime(last_features.index[-1])
+    
+    # Criar índice de datas futuras trimestrais
+    future_index = pd.date_range(start=last_date + pd.offsets.QuarterEnd(), periods=n_periods, freq=freq)
+
+    # DataFrame de previsões futuras
+    forecast_df = pd.DataFrame({"dividend_pred": future_preds}, index=future_index)
+    
+    return forecast_df

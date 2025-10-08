@@ -1,6 +1,7 @@
 import shap
 import pandas as pd
 import matplotlib.pyplot as plt
+import streamlit as st 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 
 # Configuração do SHAP para modelos lineares
@@ -125,4 +126,43 @@ def plot_feature_importance(importance: pd.Series):
     importance.plot(kind="bar", ax=ax)
     ax.set_ylabel("Importância")
     ax.set_title("Importância das Features")
+    return fig
+
+def plot_future_dividends(historical_df, forecast_df, ci_lower=None, ci_upper=None):
+    """
+    Plota dividendos históricos e futuros com intervalo de confiança e crescimento percentual.
+
+    historical_df: DataFrame histórico, colunas ['quarter_dt', 'dividend']
+    forecast_df: DataFrame futuro, colunas ['dividend_pred'], index com datas futuras
+    ci_lower: Serie ou DataFrame, limite inferior do IC para previsão
+    ci_upper: Serie ou DataFrame, limite superior do IC para previsão
+    """
+    fig, ax1 = plt.subplots(figsize=(10, 5))
+
+    # Linha histórica
+    hist_col = 'dividend' if 'dividend' in historical_df.columns else 'dividend_real'
+    ax1.plot(historical_df['quarter_dt'], historical_df[hist_col], label='Histórico', color='blue', linewidth=2)
+
+    # Linha prevista
+    ax1.plot(forecast_df.index, forecast_df['dividend_pred'], '--', label='Previsto', color='orange', linewidth=2)
+
+    # Intervalo de confiança
+    if ci_lower is not None and ci_upper is not None:
+        ax1.fill_between(forecast_df.index, ci_lower, ci_upper, color='orange', alpha=0.2, label='IC 90%')
+
+    ax1.set_xlabel("Trimestre")
+    ax1.set_ylabel("Dividendos")
+    ax1.legend(loc='upper left')
+    ax1.grid(True, linestyle='--', alpha=0.5)
+
+    # Barras de crescimento percentual
+    growth = forecast_df['dividend_pred'].pct_change().fillna(0) * 100
+    ax2 = ax1.twinx()
+    ax2.bar(forecast_df.index, growth, width=60, alpha=0.2, color='green', label='Crescimento %')
+    ax2.set_ylabel("Crescimento %")
+    ax2.legend(loc='upper right')
+
+    plt.title("Dividendos Históricos e Previsões Futuras")
+    plt.tight_layout()
+
     return fig
