@@ -87,4 +87,4 @@ O workflow está ativo e o badge de CI mostra o status atual.
 - Implementar métricas de acurácia para previsão de dividendos
 
 ## Autor
-**Pedro Gamarra** – [GitHub](https://github.com/pehgamarra) / [Linkedin] (https://www.linkedin.com/in/pedro-gamarra-9b8162181/)
+**Pedro Gamarra** – [GitHub](https://github.com/pehgamarra) / [Linkedin](https://www.linkedin.com/in/pedro-gamarra-9b8162181/)
