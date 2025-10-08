@@ -22,6 +22,7 @@ O projeto permite analisar a evolução dos dividendos de diferentes ações e g
 
 ## Estrutura do Projeto
 
+```bash
 previsor_dividendos/
 ├── app/
 │   └── streamlit_app.py
@@ -36,6 +37,7 @@ previsor_dividendos/
 ├── Dockerfile
 ├── requirements.txt
 └── .gitignore
+```
 
 ---
 
@@ -85,4 +87,4 @@ O workflow está ativo e o badge de CI mostra o status atual.
 - Implementar métricas de acurácia para previsão de dividendos
 
 ## Autor
-**Pedro Gamarra** – [GitHub](https://github.com/pehgamarra)
+**Pedro Gamarra** – [GitHub](https://github.com/pehgamarra) / [Linkedin] (https://www.linkedin.com/in/pedro-gamarra-9b8162181/)
