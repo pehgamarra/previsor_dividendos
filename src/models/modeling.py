@@ -125,7 +125,7 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
     combined.name = "strategy_return"
     return combined
 
-# Previsão futura (simples, baseado na última feature conhecida)
+# Previsão futura
 def forecast_future(model, last_features, n_periods=4, freq="Q"):
     """
     Gera previsões futuras trimestrais usando o modelo já treinado.
@@ -152,6 +152,9 @@ def forecast_future(model, last_features, n_periods=4, freq="Q"):
 
     # Garantir que o índice seja datetime
     last_date = pd.to_datetime(last_features.index[-1])
+    print( last_date, type(last_date))
+    last_date = last_date + pd.offsets.QuarterEnd(0)  # Ajusta para o final do trimestre, se necessário
+
     
     # Criar índice de datas futuras trimestrais
     future_index = pd.date_range(start=last_date + pd.offsets.QuarterEnd(), periods=n_periods, freq=freq)

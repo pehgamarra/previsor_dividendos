@@ -15,7 +15,7 @@ from src.data.preprocess import preprocess_quarterly
 from src.features.engineering import build_features, select_top_k, compute_metrics
 from src.evaluation.baselines import evaluate_baselines
 from src.evaluation.robustness import eval_robustness
-from src.models.explainability import compute_feature_importance, plot_feature_importance, shap_explain, plot_shap_summary, plot_shap_local, plot_future_dividends
+from src.models.explainability import *
 
 # --------------------
 # Configuração inicial do Streamlit
@@ -466,20 +466,21 @@ if "run_analysis" not in st.session_state:
                 last_features.index = [last_date]  # transforma em DatetimeIndex
 
                 # --- Gerar previsões futuras ---
-                forecast_df = forecast_future(model, last_features, n_periods=4)
-
+                forecast_df = forecast_future(model, last_features, n_periods=10)
+                
                 # Combina com histórico
                 historical_df = quarterly.set_index(quarterly["quarter"].dt.to_timestamp())
                 historical_df = df_pred.rename(columns={"dividend_real": "dividend"})
                 combined_df = pd.concat([historical_df[["dividend"]], forecast_df], axis=0)
 
-                # --- Gráfico ---
-                fig = plot_future_dividends(df_pred, forecast_df, ci_lower=forecast_df.get('ci_lower'), ci_upper=forecast_df.get('ci_upper'))
-                st.pyplot(fig)
+                f_raw = forecast_df.copy()
+                f_iso = postproc_isotonic_calibrate(df_pred, f_raw)
+            
+                fig = plot_future_dividends(historical_df, f_iso)
+                st.pyplot(fig, bbox_inches="tight")
 
             except Exception as e:
                 st.warning(f"Não foi possível gerar previsões futuras: {e}")
-
     
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")

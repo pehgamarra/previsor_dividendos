@@ -1,10 +1,11 @@
 import shap
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
-import streamlit as st 
 from sklearn.metrics import mean_absolute_error, mean_squared_error
+from sklearn.isotonic import IsotonicRegression
 
-# Configuração do SHAP para modelos lineares
+
 
 # Configuração para evitar warnings desnecessários
 def compute_feature_importance(model, feature_names):
@@ -154,15 +155,46 @@ def plot_future_dividends(historical_df, forecast_df, ci_lower=None, ci_upper=No
     ax1.set_ylabel("Dividendos")
     ax1.legend(loc='upper left')
     ax1.grid(True, linestyle='--', alpha=0.5)
-
-    # Barras de crescimento percentual
-    growth = forecast_df['dividend_pred'].pct_change().fillna(0) * 100
-    ax2 = ax1.twinx()
-    ax2.bar(forecast_df.index, growth, width=60, alpha=0.2, color='green', label='Crescimento %')
-    ax2.set_ylabel("Crescimento %")
-    ax2.legend(loc='upper right')
+    ax1.tick_params(axis='x', rotation=45)
+    ax1.set_title("Dividendos Históricos e Previsões Futuras")
 
     plt.title("Dividendos Históricos e Previsões Futuras")
     plt.tight_layout()
 
     return fig
+
+def postproc_isotonic_calibrate(df_pred, forecast_df, clip_min=0.0):
+    """
+    df_pred: DataFrame histórico com colunas 'dividend_real' e 'dividend_pred' (resultado do cross-val)
+    forecast_df: DataFrame futuro com coluna 'dividend_pred'
+    Retorna forecast calibrated
+    """
+    # 1) remover NaNs
+    df_cal = df_pred.dropna(subset=["dividend_real", "dividend_pred"]).copy()
+    if df_cal.empty:
+        # nada para calibrar; retorna original
+        return forecast_df.copy()
+    
+    # 2) treinar isotonic (monotonic non-decreasing mapping)
+    ir = IsotonicRegression(out_of_bounds="clip")
+    try:
+        ir.fit(df_cal["dividend_pred"].values, df_cal["dividend_real"].values)
+    except Exception:
+        return forecast_df.copy()
+    
+    # 3) aplicar ao forecast
+    calibrated = ir.predict(forecast_df["dividend_pred"].values)
+
+    # Substitui NaNs (caso extrapole) por extrapolação linear suave
+    if np.isnan(calibrated).any():
+        valid_idx = ~np.isnan(calibrated)
+        calibrated = pd.Series(calibrated).interpolate(method="linear", limit_direction="both").values
+
+    calibrated = np.clip(calibrated, clip_min, None) if clip_min is not None else calibrated
+    
+    # 4) ensemble smoothing leve
+    alpha = 0.8  # peso do isotônico vs. original
+    smoothed = alpha * calibrated + (1 - alpha) * forecast_df["dividend_pred"].values
+
+    out = pd.DataFrame({"dividend_pred": smoothed}, index=forecast_df.index)
+    return out
