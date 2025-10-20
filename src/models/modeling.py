@@ -148,7 +148,7 @@ def forecast_future(model, last_features, n_periods=4, freq="Q"):
         future_preds.append(pred)
         
         # Atualiza features para o próximo período: shift e preencher NaNs com 0
-        current_features = current_features.shift(1).fillna(0)
+        current_features = current_features.shift(1).fill()
 
     # Garantir que o índice seja datetime
     last_date = pd.to_datetime(last_features.index[-1])
