@@ -464,24 +464,44 @@ if "run_analysis" not in st.session_state:
                 last_features = features.drop(columns=["dividend", "quarter"], errors="ignore").iloc[[-1]]
                 last_date = quarterly["quarter"].iloc[-1].to_timestamp()  # converte Period -> Timestamp
                 last_features.index = [last_date]  # transforma em DatetimeIndex
-
+                
                 # --- Gerar previsões futuras ---
                 forecast_df = forecast_future(model, last_features, n_periods=10)
                 
                 # Combina com histórico
                 historical_df = df_pred.rename(columns={"dividend_real": "dividend"})
-                historical_df.index = pd.to_datetime(quarterly["quarter"].dt.to_timestamp())
+                historical_df.index = pd.to_datetime(df_pred["quarter"].dt.to_timestamp())
 
                 combined_df = pd.concat([historical_df[["dividend"]], forecast_df], axis=0)
 
                 f_raw = forecast_df.copy()
                 f_iso = postproc_isotonic_calibrate(df_pred, f_raw)
             
-                fig = plot_future_dividends(historical_df, f_iso)
-                st.pyplot(fig, bbox_inches="tight")
+                viz_option = st.selectbox(
+                    "Escolha o tipo de visualização:",
+                    ["Dashboard Completo", "Gráfico de Área", "Barras Comparativas", 
+                    "Crescimento Percentual", "Tabela Detalhada", "Cone de Incerteza"]
+                )
+                
+                if viz_option == "Dashboard Completo":
+                    fig = plot_dividend_dashboard(historical_df, f_iso)
+                elif viz_option == "Gráfico de Área":
+                    fig = plot_area_chart(historical_df, f_iso)
+                elif viz_option == "Barras Comparativas":
+                    fig = plot_bar_comparison(historical_df, f_iso)
+                elif viz_option == "Crescimento Percentual":
+                    fig = plot_growth_rate(historical_df, f_iso)
+                elif viz_option == "Tabela Detalhada":
+                    hist_col = get_dividend_column(historical_df)
+                    last_val = historical_df[hist_col].iloc[-1]
+                    fig = plot_forecast_table(f_iso, last_val)
+                else:  # Cone de Incerteza
+                    fig = plot_uncertainty_cone(historical_df, f_iso)
+                
+                st.pyplot(fig)
 
             except Exception as e:
                 st.warning(f"Não foi possível gerar previsões futuras: {e}")
-    
+
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")
