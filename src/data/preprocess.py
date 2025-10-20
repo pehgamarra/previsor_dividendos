@@ -4,6 +4,7 @@ import pandas as pd
 def preprocess_quarterly(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     """
     Transforma dados diários em dataset trimestral com alvos.
+    Remove trimestres sem dividendos ou ainda não finalizados.
     """
     data = data.copy()
     data["has_dividend"] = (data["dividend"] > 0).astype(int)
@@ -18,4 +19,12 @@ def preprocess_quarterly(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
 
     quarterly["dividend_yield"] = quarterly["dividend"] / quarterly["close"]
     quarterly["ticker"] = ticker
+
+    current_quarter = pd.Timestamp.now().to_period("Q")
+    quarterly = quarterly[
+        quarterly["dividend"].notna() &
+        (quarterly["dividend"] > 0) &
+        (quarterly["quarter"] < current_quarter)
+    ]
+
     return quarterly
