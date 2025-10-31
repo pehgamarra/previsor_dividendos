@@ -7,6 +7,7 @@ def preprocess_quarterly(data: pd.DataFrame, ticker: str) -> pd.DataFrame:
     Remove trimestres sem dividendos ou ainda não finalizados.
     """
     data = data.copy()
+    data["date"] = pd.to_datetime(data["date"])
     data["has_dividend"] = (data["dividend"] > 0).astype(int)
     data["dividend_yield"] = data["dividend"] / data["close"]
     data["quarter"] = data["date"].dt.to_period("Q")

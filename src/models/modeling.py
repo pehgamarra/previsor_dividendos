@@ -10,6 +10,12 @@ from sklearn.impute import SimpleImputer
 
 # Treinar modelo
 def train_model(X, y, model_type="ridge", n_splits=5):
+
+    if model_type == "ridge":
+        model = Ridge(alpha=0.1)
+    else:
+        raise ValueError("Modelo não suportado")
+
     X_proc = pd.get_dummies(X, drop_first=True)
     X_proc = X_proc.fillna(0)
     imputer = SimpleImputer(strategy="median")
@@ -116,7 +122,6 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
         daily_mean = daily_returns.mean(axis=1)
         series_list.append(daily_mean)
 
-    # ===== ESTAS LINHAS DEVEM ESTAR FORA DO LOOP =====
     if not series_list:
         return pd.Series(dtype=float)
 
@@ -125,41 +130,54 @@ def simulate_strategy(df_wide, df_topk, hold_period=30):
     combined.name = "strategy_return"
     return combined
 
-# Previsão futura
+
 def forecast_future(model, last_features, n_periods=4, freq="Q"):
     """
     Gera previsões futuras trimestrais usando o modelo já treinado.
-
-    model: modelo Ridge treinado
-    last_features: DataFrame com as últimas features do ticker (última linha)
-    n_periods: número de períodos futuros a prever
-    freq: frequência dos períodos ('Q' para trimestral)
+    Inclui debug prints para monitorar o comportamento.
     """
-    # Criar uma cópia e remover colunas que não estavam no treino
     current_features = last_features.copy()
     if "ticker" in current_features.columns:
         current_features = current_features.drop(columns=["ticker"])
     
     future_preds = []
 
-    for _ in range(n_periods):
-        # Previsão para o período atual
+    print("\n=== DEBUG: INICIANDO FORECAST FUTURO ===")
+    print(f"Últimas features iniciais:\n{current_features}\n")
+
+    for i in range(n_periods):
+        # Previsão atual
         pred = model.predict(current_features)[0]
         future_preds.append(pred)
-        
-        # Atualiza features para o próximo período: shift e preencher NaNs com 0
-        current_features = current_features.shift(1).fill()
+        print(f"Coef. sum: {model.coef_.sum():.4f} | Mean pred: {pred:.4f}")
 
-    # Garantir que o índice seja datetime
+        print(f"\n--- Iteração {i+1}/{n_periods} ---")
+        print(f"Predição atual: {pred}")
+        print("Features antes da atualização:")
+        print(current_features[["dividend_lag_1", "dividend_lag_2", "dividend_lag_3", "dividend_ma_3"]])
+
+        # Atualizar lags
+        current_features["dividend_lag_3"] = current_features["dividend_lag_2"]
+        current_features["dividend_lag_2"] = current_features["dividend_lag_1"]
+        current_features["dividend_lag_1"] = pred
+        current_features["dividend_ma_3"] = current_features[
+            ["dividend_lag_1", "dividend_lag_2", "dividend_lag_3"]
+        ].mean(axis=1)
+
+        print("Features após atualização:")
+        print(current_features[["dividend_lag_1", "dividend_lag_2", "dividend_lag_3", "dividend_ma_3"]])
+
+    # Garantir índice datetime
     last_date = pd.to_datetime(last_features.index[-1])
-    print( last_date, type(last_date))
-    last_date = last_date + pd.offsets.QuarterEnd(0)  # Ajusta para o final do trimestre, se necessário
-
-    
-    # Criar índice de datas futuras trimestrais
+    last_date = last_date + pd.offsets.QuarterEnd(0)
     future_index = pd.date_range(start=last_date + pd.offsets.QuarterEnd(), periods=n_periods, freq=freq)
 
-    # DataFrame de previsões futuras
     forecast_df = pd.DataFrame({"dividend_pred": future_preds}, index=future_index)
-    
+
+    # 🔹 Aplicar suavização exponencial (EMA)
+    forecast_df["dividend_pred_smooth"] = forecast_df["dividend_pred"].ewm(alpha=0.3).mean()
+
+    print("\n=== DEBUG FINAL ===")
+    print(f"Previsões futuras:\n{forecast_df}\n")
+
     return forecast_df
