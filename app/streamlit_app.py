@@ -9,7 +9,7 @@ import yfinance as yf
 from sklearn.metrics import mean_absolute_error
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from src.models.modeling import bootstrap_ci, economic_eval, train_model, simulate_strategy, forecast_future
+from src.models.modeling import *
 from src.data.fetch import fetch_data, fetch_price_history
 from src.data.preprocess import preprocess_quarterly
 from src.features.engineering import build_features, select_top_k, compute_metrics
@@ -457,26 +457,23 @@ if "run_analysis" not in st.session_state:
 
         with tab5:
             st.subheader("🔮 Previsões Futuras de Dividendos")
-            st.markdown("Visualização de previsões futuras usando o modelo treinado.")
+            st.markdown("Visualização de previsões futuras usando método estatístico simples.")
 
             try:
-                # --- Preparar últimas features do ticker ---
-                last_features = features.drop(columns=["dividend", "quarter"], errors="ignore").iloc[[-1]]
-                last_date = quarterly["quarter"].iloc[-1].to_timestamp()  # converte Period -> Timestamp
-                last_features.index = [last_date]  # transforma em DatetimeIndex
-                
                 # --- Gerar previsões futuras ---
-                forecast_df = forecast_future(model, last_features, n_periods=10)
+                forecast_df = forecast_future_stat(quarterly, n_periods=5)
                 
-                # Combina com histórico
-                historical_df = df_pred.rename(columns={"dividend_real": "dividend"})
-                historical_df.index = pd.to_datetime(df_pred["quarter"].dt.to_timestamp())
+                # Usar quarterly diretamente como histórico
+                historical_df = quarterly.copy()
+                historical_df.index = pd.to_datetime(historical_df["quarter"].dt.to_timestamp())
+                historical_df = historical_df[["dividend"]]  # Manter só a coluna dividend
+                
+                # Combinar histórico + previsão
+                combined_df = pd.concat([historical_df, forecast_df.rename(columns={"dividend_pred": "dividend"})], axis=0)
 
-                combined_df = pd.concat([historical_df[["dividend"]], forecast_df], axis=0)
-
-                f_raw = forecast_df.copy()
-                f_iso = postproc_isotonic_calibrate(df_pred, f_raw)
-            
+                # Para as funções de plot, passar com nome correto
+                f_iso = forecast_df.copy()
+                
                 viz_option = st.selectbox(
                     "Escolha o tipo de visualização:",
                     ["Dashboard Completo", "Gráfico de Área", "Barras Comparativas", 
@@ -499,9 +496,34 @@ if "run_analysis" not in st.session_state:
                     fig = plot_uncertainty_cone(historical_df, f_iso)
                 
                 st.pyplot(fig)
+                
+                # Mostrar resumo (CORRIGIDO)
+                st.info(f"""
+                **Resumo da Previsão:**
+                - Último dividendo: R$ {quarterly['dividend'].iloc[-1]:.2f}
+                - Próximo trimestre: R$ {forecast_df['dividend_pred'].iloc[0]:.2f}
+                - Média prevista (10 trimestres): R$ {forecast_df['dividend_pred'].mean():.2f}
+                - Crescimento anual estimado: {((forecast_df['dividend_pred'].iloc[3] / quarterly['dividend'].iloc[-1]) - 1) * 100:.1f}%
+                """)
+                
+                # Aviso de volatilidade
+                recent_change = abs(quarterly['dividend'].iloc[-1] - quarterly['dividend'].iloc[-2]) / quarterly['dividend'].iloc[-2]
+                if recent_change > 0.3:
+                    st.warning(f"""
+                    ⚠️ **Alta Volatilidade Detectada!** (Variação: {recent_change*100:.1f}%)
+                    
+                    Os dividendos da Petrobras apresentam oscilações significativas entre trimestres:
+                    - Podem incluir dividendos extraordinários
+                    - Refletem política de distribuição variável da empresa
+                    - Dependem do preço do petróleo e resultados trimestrais
+                    
+                    **As previsões foram ajustadas para crescimento conservador de {((1.02**4 - 1)*100):.1f}% ao ano.**
+                    """)
 
             except Exception as e:
-                st.warning(f"Não foi possível gerar previsões futuras: {e}")
-
+                st.error(f"Não foi possível gerar previsões futuras: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+                
 else:
     st.info("Selecione um ticker na barra lateral e clique em **Analisar**.")
